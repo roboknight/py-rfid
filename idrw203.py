@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 
-#import usb.core
-#import usb.util
-#import json
 import struct
 import hid
 from binascii import hexlify,unhexlify
@@ -12,6 +9,7 @@ from binascii import hexlify,unhexlify
 #http://ww1.microchip.com/downloads/en/DeviceDoc/ATA5577C-Read-Write-LF-RFID-IDIC-100-to-150-kHz-Data-Sheet-DS70005357B.pdf
 #https://www.emmicroelectronic.com/sites/default/files/products/datasheets/4205-4305-DS-01.pdf
 
+########### This is all cruft from the previous code ############
 COMMAND_IDX = {
   0x00:"GetSupport",
   0x01:"TestDevice",
@@ -82,6 +80,17 @@ RESPONSE_DWORD = b'\x80'
 RESPONSE_TAG = b'\x90'
 RESPONSE_ERROR = b'\xff'
 
+################ Kept around to compare with "OEM" software ###########
+
+######### My code ########
+##########################
+
+#
+# Class to deal with responses.
+# It appears this wasn't entirely
+# Necessary as Messages are just
+# prefixed with a direction byte.
+#
 class Rsp():
   RESPONSE_OK = b'\x83'
   __pkt = b''
@@ -112,6 +121,10 @@ class Rsp():
     print('')
     print(self.IsResponseOK())
 
+#
+# Class to build messages based on
+# what the software appears to do.
+#
 class Msg():
   __pkt = b''
   MESSAGE_END_MARKER = b'\x04'
@@ -167,6 +180,9 @@ class Msg():
         return True
     return False
 
+#
+# Class that talks to the CTX-203-ID-RW
+#
 class CTX_IDRW203():
   CLIENT_TO_DEVICE_MARKER = b'\x03'
   DEVICE_TO_CLIENT_MARKER = b'\x05'
@@ -225,117 +241,14 @@ class CTX_IDRW203():
         return Rsp(m[1:m[2]+1],expected=exp)
     return Rsp(b'')
 
-################### End of Good code #################
-################## Stupid code begins ################
-class IDRW203():
-  def __init__(self, vid=0x6688, pid=0x6850):
-    self.vid = vid
-    self.pid = pid
-    self.debug = False
-    self.connected = False
-    
-    
-  def disconnect(self):
-    if self.connected == True:
-      self.connected = False
-      self.dev.close()
-
-  def connect(self):
-    if self.connected == False:
-      try:
-        self.dev = hid.Device(vid=self.vid,pid=self.pid)
-        #self.dev.open(self.vid, self.pid)
-        if self.debug:
-          print('Connected to dev')
-        self.connected = True
-      except:
-        pass
-  
-    return self.connected
-
-  def checksum_packet(self,pkt):
-      r = self.calc_checksum(pkt[1:-2])
-      print(r)
-      print(pkt[-2])
-      if r == pkt[-2] and pkt[-1] == MESSAGE_END_MARKER :
-        return(True,r)
-      else:
-        return(False,r)
-      
-  def strip_packet(self, pkt):
-    return pkt[3:-2]
-
-  def recv_response(self, response_pkt):
-    print(response_pkt)
-    response_pkt = response_pkt[0:response_pkt[2] + 1]
-    (isgood, r) = self.checksum_packet(response_pkt)
-    if isgood:
-      s = self.strip_packet(response_pkt)
-      return s
-    else:
-      return None
-
-  def Em4305_login(self,password=0x00000000):
-    return self.send_command(CMD_EM4305, [EM4305_CMD_LOGIN, 1] + list(struct.pack("<I", password)) + [0])  #some guessing here
-
-
-  def Em4305_write_word(self, idx, word):
-
-    return self.send_command(CMD_T5577, [T5577_CMD_WRITE_BLOCK, page] + list(struct.pack("<I", value)) + [block])
-
-
-  def T5577_write_block(self,page,block,value):
-    return self.send_command(CMD_T5577, [T5577_CMD_WRITE_BLOCK, page] + list(struct.pack("<I", value)) + [block])
-  
-  def buzzer(self,duration=0x09):
-    return self.send_command(CMD_BUZZER,[duration])
-    
-  def get_support(self):
-    return self.send_command(CMD_GET_SUPPORT)
-    
-  
-  def Em4100_read(self):
-    return self.send_command(CMD_EM4100_READ)
-
-  def send_command(self, cmd_id, argbuff=b''):
-    print('HI')
-    if self.connected:
-      tmpbuff  = MESSAGE_START_MARKER + (len(argbuff)+5).to_bytes(1,'big')+ cmd_id + argbuff
-      print(tmpbuff)
-      outbuff = CLIENT_TO_DEVICE_MARKER + tmpbuff + self.calc_checksum(tmpbuff) + MESSAGE_END_MARKER
-      print(outbuff)
-      if(self.debug):
-        print(bytes(outbuff))
-      self.dev.write(outbuff)
-      buf = self.dev.read(1000)
-      ret = self.recv_response(buf)
-      if ret:
-        if ret[0] == RESPONSE_OK:
-          return (True,RESPONSE_OK,True)
-        elif ret[0] == RESPONSE_ERROR:
-          return (True,RESPONSE_ERROR,False)
-        elif ret[0] == RESPONSE_BYTE:
-          return (True,RESPONSE_BYTE,struct.unpack("b",bytes(ret[1]))[0])
-        elif ret[0] == RESPONSE_WORD:
-          return (True,RESPONSE_WORD,struct.unpack("<H",bytes(ret[1:]))[0])
-        elif ret[0] == RESPONSE_TAG:
-          return (True,RESPONSE_TAG,"".join(["%02x"%x for x in ret[2:]]))
-        elif ret[0] == RESPONSE_DWORD:
-          return (True,RESPONSE_TAG,struct.unpack("<i", bytes(ret[1:]))[0])
-        else:
-          return (True,hex(ret[0]),ret[1:])
-        print('HI')
-        return (False, None, None)
-##      else
-#       return (False,None)
-#     return buf
-#   else:
-#     raise ValueException
-
-
 ################### MAIN ######################
 ##################        #####################
 
+##############################################################
+#
+# cmd_test_noconnect: Attempts to build and send a command.
+#
+##############################################################
 def cmd_test_noconnect(cmd, arg=b'', d=None):
   if d == None:
     print('No device specified in parameters!')
@@ -352,6 +265,12 @@ def cmd_test_noconnect(cmd, arg=b'', d=None):
   r.Display()
   return r
 
+##############################################################
+#
+# cmd_test: Attempts to build and send a command.  Connects
+#           and disconnects every time.  Not really useful.
+#
+##############################################################
 def cmd_test(cmd, arg=b''):
   ### Connect ###
   d = CTX_IDRW203(debug=True)
@@ -367,6 +286,11 @@ def cmd_test(cmd, arg=b''):
   ### Close ###
   d.Disconnect()
 
+##############################################################
+#
+# read_id: Function just keeps reading until it sees a token.
+#
+##############################################################
 def read_id(d=None):
   if d == None:
     print('No device specified in parameters!')
@@ -388,6 +312,10 @@ if __name__ == '__main__':
   #cmd_test_noconnect(b'\x14',b'\x03',d)    # RF Start
   #cmd_test_noconnect(b'\x14',b'\x02',d)    # RF Stop
   d.Disconnect()
+
+  ####### Some simple test code #######
+  #####################################
+
   ### Create Bell message ###
   #m = Msg(CMD_BELL, b'\x01')
   #m.Display()
@@ -414,31 +342,3 @@ if __name__ == '__main__':
   ### Disconnect ###
   #d.Disconnect()
 
-#as seen in the usb capture
-#  (success,vt, tagid) = d.Em4100_read()
-#  if success:
-#    d.buzzer(9)
-#   print(d.get_support())
-#    print(d.Em4100_read())
-  
-#
-# (success,vt, ret) = d.Em4305_login(0x00000000)
-# (success,vt, ret) = d.Em4305_login(0x00000000)
-#
-# (success,vt, ret) = d.T5577_write_block(0,1,0x326580ff) #id
-# (success,vt, ret) = d.T5577_write_block(0,2,0xe6c6c754) #id
-# (success,vt, ret) = d.T5577_write_block(0,0,0x41801400) #config infirmation
-#
-# (success,vt, tagid)  = d.Em4100_read()
-# if success:
-#   d.buzzer(9)
-
-
-#def column_parity(hex_buf, shift) {
-# int i, p=0;
-#
-# for i in range(5):
-#   p += (hex_buf[i] >> shift + 4) & 0x01
-#   p += (hex_buf[i] >> shift) & 0x01
-# return p&1;
-#}
